@@ -1,0 +1,236 @@
+<!DOCTYPE html><html lang="zh-CN" data-theme="light"><head><meta charset="UTF-8"><meta http-equiv="X-UA-Compatible" content="IE=edge"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Linux全版本通杀提权漏洞的复现与分析 | 贤</title><meta name="description" content="0x01简介实验所属系列：网络安全事件 相关课程及专业： Linux基础 预备知识概述   脏牛(Dirty COW，编号：CVE-2016-5195)是2016年10月18日被曝出的存在于Linux内核中的一款0day漏洞。因为此漏洞是在Linux内核的内存子系统在处理写时拷贝(Copy-on-Write)时发生的，而又给Linux内核的使用带来烦恼，所以将其命名为“Dirty COW”。"><meta name="keywords" content="实验"><meta name="author" content="Mr. Qian"><meta name="copyright" content="Mr. Qian"><meta name="format-detection" content="telephone=no"><link rel="shortcut icon" href="/img/favicon.png"><link rel="canonical" href="http://qbx12138.xyz/2020/06/20/Linux%E5%85%A8%E7%89%88%E6%9C%AC%E9%80%9A%E6%9D%80%E6%8F%90%E6%9D%83%E6%BC%8F%E6%B4%9E%E7%9A%84%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%86%E6%9E%90/"><meta http-equiv="Cache-Control" content="no-transform"><meta http-equiv="Cache-Control" content="no-siteapp"><link rel="preconnect" href="//cdn.jsdelivr.net"/><link rel="preconnect" href="//fonts.googleapis.com" crossorigin="crossorigin"/><link rel="preconnect" href="//busuanzi.ibruce.info"/><meta property="og:type" content="article"><meta property="og:title" content="Linux全版本通杀提权漏洞的复现与分析"><meta property="og:url" content="http://qbx12138.xyz/2020/06/20/Linux%E5%85%A8%E7%89%88%E6%9C%AC%E9%80%9A%E6%9D%80%E6%8F%90%E6%9D%83%E6%BC%8F%E6%B4%9E%E7%9A%84%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%86%E6%9E%90/"><meta property="og:site_name" content="贤"><meta property="og:description" content="0x01简介实验所属系列：网络安全事件 相关课程及专业： Linux基础 预备知识概述   脏牛(Dirty COW，编号：CVE-2016-5195)是2016年10月18日被曝出的存在于Linux内核中的一款0day漏洞。因为此漏洞是在Linux内核的内存子系统在处理写时拷贝(Copy-on-Write)时发生的，而又给Linux内核的使用带来烦恼，所以将其命名为“Dirty COW”。"><meta property="og:image" content="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/AA1.jpg"><meta property="article:published_time" content="2020-06-20T01:42:04.000Z"><meta property="article:modified_time" content="2020-07-29T07:19:16.865Z"><meta name="twitter:card" content="summary"><script>var activateDarkMode = function () {
+  document.documentElement.setAttribute('data-theme', 'dark')
+  if (document.querySelector('meta[name="theme-color"]') !== null) {
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', '#000')
+  }
+}
+var activateLightMode = function () {
+  document.documentElement.setAttribute('data-theme', 'light')
+  if (document.querySelector('meta[name="theme-color"]') !== null) {
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', '#fff')
+  }
+}
+
+var getCookies = function (name) {
+  const value = `; ${document.cookie}`
+  const parts = value.split(`; ${name}=`)
+  if (parts.length === 2) return parts.pop().split(';').shift()
+}
+
+var autoChangeMode = 'false'
+var t = getCookies('theme')
+if (autoChangeMode === '1') {
+  var isDarkMode = window.matchMedia('(prefers-color-scheme: dark)').matches
+  var isLightMode = window.matchMedia('(prefers-color-scheme: light)').matches
+  var isNotSpecified = window.matchMedia('(prefers-color-scheme: no-preference)').matches
+  var hasNoSupport = !isDarkMode && !isLightMode && !isNotSpecified
+
+  if (t === undefined) {
+    if (isLightMode) activateLightMode()
+    else if (isDarkMode) activateDarkMode()
+    else if (isNotSpecified || hasNoSupport) {
+      console.log('You specified no preference for a color scheme or your browser does not support it. I Schedule dark mode during night time.')
+      var now = new Date()
+      var hour = now.getHours()
+      var isNight = hour <= 6 || hour >= 18
+      isNight ? activateDarkMode() : activateLightMode()
+    }
+    window.matchMedia('(prefers-color-scheme: dark)').addListener(function (e) {
+      if (Cookies.get('theme') === undefined) {
+        e.matches ? activateDarkMode() : activateLightMode()
+      }
+    })
+  } else if (t === 'light') activateLightMode()
+  else activateDarkMode()
+} else if (autoChangeMode === '2') {
+  now = new Date()
+  hour = now.getHours()
+  isNight = hour <= 6 || hour >= 18
+  if (t === undefined) isNight ? activateDarkMode() : activateLightMode()
+  else if (t === 'light') activateLightMode()
+  else activateDarkMode()
+} else {
+  if (t === 'dark') activateDarkMode()
+  else if (t === 'light') activateLightMode()
+}</script><link rel="stylesheet" href="/css/index.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free/css/all.min.css"><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@latest/dist/jquery.fancybox.min.css"><link rel="prev" title="IIS6.0远程代码执行0day漏洞分析和利用" href="http://qbx12138.xyz/2020/06/25/IIS6.0%E8%BF%9C%E7%A8%8B%E4%BB%A3%E7%A0%81%E6%89%A7%E8%A1%8C0day%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E5%92%8C%E5%88%A9%E7%94%A8/"><link rel="next" title="由12306撞库事件引发的思考" href="http://qbx12138.xyz/2020/06/15/%E7%94%B112306%E6%92%9E%E5%BA%93%E4%BA%8B%E4%BB%B6%E5%BC%95%E5%8F%91%E7%9A%84%E6%80%9D%E8%80%83/"><link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Titillium+Web&amp;display=swap"><script>var GLOBAL_CONFIG = { 
+  root: '/',
+  algolia: undefined,
+  localSearch: undefined,
+  translate: {"defaultEncoding":2,"translateDelay":0,"msgToTraditionalChinese":"繁","msgToSimplifiedChinese":"簡"},
+  copy: {
+    success: '复制成功',
+    error: '复制错误',
+    noSupport: '浏览器不支持'
+  },
+  bookmark: {
+    message_prev: '按',
+    message_next: '键将本页加入书签'
+  },
+  runtime_unit: '天',
+  runtime: false,
+  copyright: undefined,
+  ClickShowText: undefined,
+  medium_zoom: false,
+  fancybox: true,
+  Snackbar: undefined,
+  justifiedGallery: {
+    js: 'https://cdn.jsdelivr.net/npm/justifiedGallery/dist/js/jquery.justifiedGallery.min.js',
+    css: 'https://cdn.jsdelivr.net/npm/justifiedGallery/dist/css/justifiedGallery.min.css'
+  },
+  baiduPush: false,
+  highlightCopy: true,
+  highlightLang: true,
+  isPhotoFigcaption: false,
+  islazyload: true,
+  isanchor: false    
+}</script><script>var GLOBAL_CONFIG_SITE = { 
+  isPost: true,
+  isHome: false,
+  isHighlightShrink: ,
+  isSidebar: true
+  }</script><noscript><style>
+#nav {
+  opacity: 1
+}
+.justified-gallery img{
+  opacity: 1
+}
+</style></noscript><meta name="generator" content="Hexo 4.2.1"></head><body><div id="mobile-sidebar"><div id="menu_mask"></div><div id="mobile-sidebar-menus"><div class="mobile_author_icon"><img class="avatar-img" src="/img/avatar.png" onerror="onerror=null;src='/img/friend_404.gif'" alt="avatar"/></div><div class="mobile_post_data"><div class="mobile_data_item is-center"><div class="mobile_data_link"><a href="/archives/"><div class="headline">文章</div><div class="length_num">6</div></a></div></div><div class="mobile_data_item is-center">      <div class="mobile_data_link"><a href="/tags/"><div class="headline">标签</div><div class="length_num">3</div></a></div></div><div class="mobile_data_item is-center">     <div class="mobile_data_link"><a href="/categories/"><div class="headline">分类</div><div class="length_num">3</div></a></div></div></div><hr/><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> Home</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> Archives</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> Tags</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> Categories</span></a></div><div class="menus_item"><a class="site-page"><i class="fa-fw fas fa-list"></i><span> List</span><i class="fas fa-chevron-down menus-expand"></i></a><ul class="menus_item_child"><li><a class="site-page" href="/music/"><i class="fa-fw fas fa-music"></i><span> Music</span></a></li><li><a class="site-page" href="/movies/"><i class="fa-fw fas fa-video"></i><span> Movie</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> Link</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> About</span></a></div></div></div></div><i class="fas fa-arrow-right on" id="toggle-sidebar"></i><div id="sidebar"><div class="sidebar-toc"><div class="sidebar-toc__title">目录</div><div class="sidebar-toc__progress"><span class="progress-notice">你已经读了</span><span class="progress-num">0</span><span class="progress-percentage">%</span><div class="sidebar-toc__progress-bar">     </div></div><div class="sidebar-toc__content"><ol class="toc"><li class="toc-item toc-level-1"><a class="toc-link" href="#0x01简介"><span class="toc-number">1.</span> <span class="toc-text">0x01简介</span></a><ol class="toc-child"><li class="toc-item toc-level-3"><a class="toc-link" href="#预备知识"><span class="toc-number">1.0.1.</span> <span class="toc-text">预备知识</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#实验目的"><span class="toc-number">1.0.2.</span> <span class="toc-text">实验目的</span></a></li><li class="toc-item toc-level-3"><a class="toc-link" href="#实验环境"><span class="toc-number">1.0.3.</span> <span class="toc-text">实验环境</span></a></li></ol></li></ol></li><li class="toc-item toc-level-1"><a class="toc-link" href="#0x02实验步骤"><span class="toc-number">2.</span> <span class="toc-text">0x02实验步骤</span></a><ol class="toc-child"><li class="toc-item toc-level-2"><a class="toc-link" href="#实验步骤一"><span class="toc-number">2.1.</span> <span class="toc-text">实验步骤一</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#实验步骤二"><span class="toc-number">2.2.</span> <span class="toc-text">实验步骤二</span></a></li><li class="toc-item toc-level-2"><a class="toc-link" href="#实验步骤三"><span class="toc-number">2.3.</span> <span class="toc-text">实验步骤三</span></a></li></ol></li></ol></div></div></div><div id="body-wrap"><header class="post-bg" id="page-header" style="background-image: url(https://qbx-image.oss-cn-hangzhou.aliyuncs.com/AA1.jpg)"><nav id="nav"><span class="pull-left" id="blog_name"><a class="blog_title" id="site-name" href="/">贤</a></span><span class="pull-right menus"><div class="menus_items"><div class="menus_item"><a class="site-page" href="/"><i class="fa-fw fas fa-home"></i><span> Home</span></a></div><div class="menus_item"><a class="site-page" href="/archives/"><i class="fa-fw fas fa-archive"></i><span> Archives</span></a></div><div class="menus_item"><a class="site-page" href="/tags/"><i class="fa-fw fas fa-tags"></i><span> Tags</span></a></div><div class="menus_item"><a class="site-page" href="/categories/"><i class="fa-fw fas fa-folder-open"></i><span> Categories</span></a></div><div class="menus_item"><a class="site-page"><i class="fa-fw fas fa-list"></i><span> List</span><i class="fas fa-chevron-down menus-expand"></i></a><ul class="menus_item_child"><li><a class="site-page" href="/music/"><i class="fa-fw fas fa-music"></i><span> Music</span></a></li><li><a class="site-page" href="/movies/"><i class="fa-fw fas fa-video"></i><span> Movie</span></a></li></ul></div><div class="menus_item"><a class="site-page" href="/link/"><i class="fa-fw fas fa-link"></i><span> Link</span></a></div><div class="menus_item"><a class="site-page" href="/about/"><i class="fa-fw fas fa-heart"></i><span> About</span></a></div></div><span class="toggle-menu close"><a class="site-page"><i class="fas fa-bars fa-fw"></i></a></span></span></nav><div id="post-info"><div id="post-title"><div class="posttitle">Linux全版本通杀提权漏洞的复现与分析</div></div><div id="post-meta"><div class="meta-firstline"><time class="post-meta__date"><span class="post-meta__date-created" title="发表于 2020-06-20 09:42:04"><i class="far fa-calendar-alt fa-fw"></i> 发表于 2020-06-20</span><span class="post-meta__separator">|</span><span class="post-meta__date-updated" title="更新于 2020-07-29 15:19:16"><i class="fas fa-history fa-fw"></i> 更新于 2020-07-29</span></time><span class="post-meta__categories"><span class="post-meta__separator">|</span><i class="fas fa-inbox fa-fw post-meta__icon"></i><a class="post-meta__categories" href="/categories/%E5%AE%9E%E9%AA%8C/">实验</a></span></div><div class="meta-secondline"> </div><div class="meta-thirdline"><span class="post-meta-pv-cv"><i class="far fa-eye fa-fw post-meta__icon"></i><span>阅读量:</span><span id="busuanzi_value_page_pv"></span></span><span class="post-meta-commentcount"></span></div></div></div></header><main class="layout_post" id="content-inner"><article id="post"><div class="post-content" id="article-container"><h1 id="0x01简介"><a href="#0x01简介" class="headerlink" title="0x01简介"></a>0x01简介</h1><p>实验所属系列：网络安全事件</p>
+<p>相关课程及专业： Linux基础</p>
+<h3 id="预备知识"><a href="#预备知识" class="headerlink" title="预备知识"></a>预备知识</h3><p>概述</p>
+<p>  脏牛(Dirty COW，编号：CVE-2016-5195)是2016年10月18日被曝出的存在于Linux内核中的一款0day漏洞。因为此漏洞是在Linux内核的内存子系统在处理写时拷贝(Copy-on-Write)时发生的，而又给Linux内核的使用带来烦恼，所以将其命名为“Dirty COW”。</p>
+<p>  这个漏洞10月18号由Phil Oester提交，被Linux的创始人Linus亲自修复，并且在当天将Linux内核补丁提交至:<a href="https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/" target="_blank" rel="noopener">https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/</a></p>
+<p>  10月20号，漏洞的发现者Phil Oester将漏洞的部分细节提交到github上，Phil Oester表示，Dirty COW漏洞是一个古老的漏洞，发现于2007年，并一直存在于后续的Linux版本当中。</p>
+<p>  漏洞编号：CVE-2016-5195</p>
+<p>  漏洞类型：内核竞态条件漏洞</p>
+<p>  漏洞危害：本地提权</p>
+<p>  影响范围：Linux kernel&gt;2.6.22 (released in 2007)</p>
+<p>  需了解以下技术：</p>
+<p>  写时拷贝(Copy on Write,COW)</p>
+<p>  竞态条件</p>
+<p>  页式内存管理</p>
+<p>  缺页中断处理</p>
+<p>  Dirty COW网站：</p>
+<p>  <a href="https://dirtycow.ninja/" target="_blank" rel="noopener">https://dirtycow.ninja/</a></p>
+<p>  Poc项目地址：</p>
+<p>  PoCs · dirtycow/dirtycow.github.io Wiki · GitHub <a href="https://github.com/dirtycow/dirtycow.github.io/wiki/PoCs" target="_blank" rel="noopener">https://github.com/dirtycow/dirtycow.github.io/wiki/PoCs</a></p>
+<p>  参考文档：</p>
+<p>  CVE-2016-5195 Dirtycow: Linux内核提权漏洞分析：<a href="http://bobao.360.cn/learning/detail/3132.html" target="_blank" rel="noopener">http://bobao.360.cn/learning/detail/3132.html</a></p>
+<p>  <a href="https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails" target="_blank" rel="noopener">https://github.com/dirtycow/dirtycow.github.io/wiki/VulnerabilityDetails</a></p>
+<p>  <a href="https://access.redhat.com/security/cve/CVE-2016-5195" target="_blank" rel="noopener">https://access.redhat.com/security/cve/CVE-2016-5195</a></p>
+<p>  Protect from CVE-2016-5195 (DirtyCow) on Centos 7/RHEL7/cPanel/CloudLinux：</p>
+<p>  <a href="https://gryzli.info/2016/10/21/protect-cve-2016-5195-dirtycow-centos-7rhel7cpanelcloudlinux/" target="_blank" rel="noopener">https://gryzli.info/2016/10/21/protect-cve-2016-5195-dirtycow-centos-7rhel7cpanelcloudlinux/</a></p>
+<h3 id="实验目的"><a href="#实验目的" class="headerlink" title="实验目的"></a>实验目的</h3><p>1）漏洞检测复现</p>
+<p>2）漏洞形成原因</p>
+<p>3）漏洞修复建议</p>
+<h3 id="实验环境"><a href="#实验环境" class="headerlink" title="实验环境"></a>实验环境</h3><p>操作系统： Centos 7 1511</p>
+<p>IP随机</p>
+<h1 id="0x02实验步骤"><a href="#0x02实验步骤" class="headerlink" title="0x02实验步骤"></a>0x02实验步骤</h1><h2 id="实验步骤一"><a href="#实验步骤一" class="headerlink" title="实验步骤一"></a>实验步骤一</h2><p>漏洞检测复现</p>
+<p>1、编译poc 文件</p>
+<p>  切换到cow用户</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b1.png" alt="">    </p>
+<p>  当前系统内核版本和系统版本：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b2.png" alt=""></p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b3.png" alt="">    </p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b4.png" alt="">    </p>
+<p>  我们根据代码中的说明进行编译和测试：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b5.png" alt="">    </p>
+<p>  输入如下指令进行编译：gcc -lpthread dirtycOw.c -o dirtycOw</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b6.png" alt="">    </p>
+<p>  没有报错证明编译成功。</p>
+<p>  测试：</p>
+<p>  新建一个只有读权限的文件，利用poc对文件进行越权写入</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b7.png" alt="">    </p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b8.png" alt="">    </p>
+<p>  接下来就是见证奇迹的时刻：执行时间大约需要1分钟左右</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b9.png" alt="">    </p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b10.png" alt="">    </p>
+<p>  查看文件：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b11.png" alt="">    </p>
+<p>  我们发现本来只有只读权限的文件，里面的内容被改变了。</p>
+<p>  如果你得到的是如下结果，说明你的系统没有受到这个漏洞影响</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b12.png" alt="">    </p>
+<h2 id="实验步骤二"><a href="#实验步骤二" class="headerlink" title="实验步骤二"></a>实验步骤二</h2><p>漏洞形成原因</p>
+<p>1、写时拷贝技术</p>
+<p>  在Linux程序中，fork（）会产生一个和父进程完全相同的子进程，但子进程在此后多会exec系统调用，出于效率考虑，linux中引入了“写时复制“技术，也就是只有进程空间的各段的内容要发生变化时，才会将父进程的内容复制一份给子进程。</p>
+<p>  Linux内核的内存子系统在处理写时拷贝（Copy-on-Write)时存在条件竞争漏洞，导致可以破坏私有只读内存映射。一个低权限的本地用户能够利用此漏洞获取其他只读内存映射的写权限，有可能进一步导致提权漏洞。</p>
+<p>  竞态条件（race condition）是指设备或系统出现不恰当的执行时序，而得到不正确的结果。</p>
+<p>2、触发原理：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b13.png" alt=""></p>
+<p> 调用write系统调用向/proc/self/mem文件中写入数据时，进入内核态后内核会调用get_user_pages函数获取要写入内存地址。get_user_pages会调用follow_page_mask来获取这块内存的页表项，并同时要求页表项所指向的内存映射具有可写的权限。</p>
+<p>  第一次获取内存的页表项会因为缺页而失败。get_user_page调用faultin_page进行缺页处理后第二次调用follow_page_mask获取这块内存的页表项，如果需要获取的页表项指向的是一个只读的映射，那第二次获取也会失败。这时候get_user_pages函数会第三次调用follow_page_mask来获取该内存的页表项，并且不再要求页表项所指向的内存映射具有可写的权限，这时是可以成功获取的，获取成功后内核会对这个只读的内存进行强制的写入操作。</p>
+<p>  这个实现是没有问题的，因为本来写入/proc/self/mem就是一个无视映射权限的强行写入，就算是文件映射到虚拟内存中，也不会出现越权写：</p>
+<p>  如果写入的虚拟内存是一个VM_PRIVATE的映射，那在缺页的时候内核就会执行COW操作产生一个副本来进行写入，写入的内容是不会同步到文件中的</p>
+<p>  如果写入的虚拟内存是一个VM_SHARE的映射，那mmap能够映射成功的充要条件就是进程拥有对该文件的写权限，这样写入的内容同步到文件中也不算越权了。</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b14.png" alt="">    </p>
+<p> <img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b15.png" alt=""></p>
+<p>  但是，在上述流程中，如果第二次获取页表项失败之后，另一个线程调用madvice(addr,addrlen, MADV_DONTNEED),其中addr~addr+addrlen是一个只读文件的VM_PRIVATE的只读内存映射，那该映射的页表项会被置空。这时如果get_user_pages函数第三次调用follow_page_mask来获取该内存的页表项。由于这次调用不再要求该内存映射具有写权限，所以在缺页处理的时候内核也不再会执行COW操作产生一个副本以供写入。所以缺页处理完成后后第四次调用follow_page_mask获取这块内存的页表项的时候，不仅可以成功获取，而且获取之后强制的写入的内容也会同步到映射的只读文件中。从而导致了只读文件的越权写。</p>
+<h2 id="实验步骤三"><a href="#实验步骤三" class="headerlink" title="实验步骤三"></a>实验步骤三</h2><p>漏洞修复建议</p>
+<p>  Redhat检查漏洞脚本：</p>
+<p>  wget <a href="https://access.redhat.com/sites/default/files/rh-cve-2016-5195_2.sh" target="_blank" rel="noopener">https://access.redhat.com/sites/default/files/rh-cve-2016-5195_2.sh</a></p>
+<p>  bash rh-cve-2016-5195_2.sh</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b16.png" alt="">    </p>
+<p>1、升级内核修复</p>
+<p>  CentOS 6/7 系列操作系统：</p>
+<p>  1) 检查是否有内核升级包：yum check-update |grep kernel</p>
+<p>  2) 升级内核：yum update kernel</p>
+<p>  3) 然后重启系统</p>
+<p>  4) 查看版本：uname -a</p>
+<p>  Ubuntu 系列操作系统：</p>
+<p>  Ubuntu 系统必须在/etc/apt/sources.list中开启–security后缀的源地址才能收到更新。</p>
+<p>  untu 12.04 LTS (precise)</p>
+<p>  deb <a href="http://security.ubuntu.com/ubuntu/" target="_blank" rel="noopener">http://security.ubuntu.com/ubuntu/</a> precise-security main</p>
+<p>  Ubuntu 14.04 LTS (trusty)</p>
+<p>  deb <a href="http://security.ubuntu.com/ubuntu/" target="_blank" rel="noopener">http://security.ubuntu.com/ubuntu/</a> trusty-security main</p>
+<p>  更新包列表：</p>
+<p>  sudo apt-get update</p>
+<p>  升级软件包：</p>
+<p>  sudo apt-get upgrade</p>
+<p>  重启系统</p>
+<p>2、编译修复</p>
+<p>  可以通过 git 分支获取修复代码，自行编译进行修复，但存在一定的风险。<a href="https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=19be0eaffa3ac7d8eb6784ad9bdbc7d67ed8e619" target="_blank" rel="noopener">https://git.kernel.org/cgit/linux/kernel/git/torvalds/linux.git/commit/?id=19be0eaffa3ac7d8eb6784ad9bdbc7d67ed8e619</a></p>
+<p>3、免重启临时修复</p>
+<p>  由于该漏洞位于 Linux 内核，发行版官方的内核更新只有在重启后才能生效。如果线上业务不能中断，可以采用基于 systemtap 的热修补方法</p>
+<p>  systemtap 是一款内核调试、性能分析工具，其原理是插入新的内核模块并根据需要修改逻辑，实现功能。该工具同样可以被用于安全应急响应。</p>
+<p>  1) 安装systemtap, kernel-devel and kernel-debuginfo 软件包（实验环境已经安装好）</p>
+<p>  切换回root用户：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b17.png" alt="">    </p>
+<p> 2) 创建stap文件</p>
+<p>  代码如下：</p>
+<p>  probe kernel.function(“mem_write”).call ? {</p>
+<p>  $count = 0</p>
+<p>  }</p>
+<p>  probe syscall.ptrace { // includes compat ptrace as well</p>
+<p>  $request = 0xfff</p>
+<p>  }</p>
+<p>  probe begin {</p>
+<p>  printk(0, “CVE-2016-5195 mitigation loaded”)</p>
+<p>  }</p>
+<p>  probe end {</p>
+<p>  printk(0, “CVE-2016-5195 mitigation unloaded”)</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b18.png" alt="">    </p>
+<p> 作用是阻止写入 /proc/self/mem</p>
+<p>  3) 生成stap模块</p>
+<p>  stap -p4 -g /root/CVE-2016-5195.stap</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b19.png" alt=""></p>
+<p> 4) 安装这个模块</p>
+<p>  模块路径为上一步生成的文件路径</p>
+<p>  staprun -L /root/.systemtap/cache/06/stap_0613bdc7535b2c7fcbf11d33c024acbb_65596.ko</p>
+<p>  安装模块时可能会出现bash断开，出现”mitigation loaded”后按回车即可</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b20.png" alt=""></p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b21.png" alt="">    </p>
+<p> 模块已经被安装了。</p>
+<p>  PS：这个方法只能临时生效，重启之后需要重新加载，所以还是建议使用update进行修复。</p>
+<p>  切换到cow用户，重新验证一次POC。</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b22.png" alt="">    </p>
+<p>  已经被修复了。</p>
+<p>  PS：还可以根据<a href="http://mp.weixin.qq.com/s?__biz=MzIwNDA2NDk5OQ==&mid=2651370571&idx=1&sn=68acf07ca2683a9c98fa52e900d97db3&chksm=8d39c5c3ba4e4cd58c21d0a21ca337ded2132625987e174d286f8d175034267bd09807ea9a11&scene=4#wechat_redirect" target="_blank" rel="noopener">长亭科技</a>：</p>
+<p>  （<a href="http://mp.weixin.qq.com/s?__biz=MzIwNDA2NDk5OQ==&amp;mid=2651370571&amp;idx=1&amp;sn=68acf07ca2683a9c98fa52e900d97db3&amp;chksm=8d39c5c3ba4e4cd58c21d0a21ca337ded2132625987e174d286f8d175034267bd09807ea9a11&amp;scene=4#wechat_redirect）提供另外一种办法来修复。" target="_blank" rel="noopener">http://mp.weixin.qq.com/s?__biz=MzIwNDA2NDk5OQ==&amp;mid=2651370571&amp;idx=1&amp;sn=68acf07ca2683a9c98fa52e900d97db3&amp;chksm=8d39c5c3ba4e4cd58c21d0a21ca337ded2132625987e174d286f8d175034267bd09807ea9a11&amp;scene=4#wechat_redirect）提供另外一种办法来修复。</a></p>
+<p>  因为阻止写入 /proc/self/mem有较为明显的副作用：无法调试程序，还可能导致 RHEL/CentOS 6 和 Ubuntu 14.04 上使用的 upstart 服务管理机制不能正常工作。</p>
+<p>  所以可以将stap文件修改成如下：</p>
+<p><img src= "/img/loading.gif" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/b23.png" alt="">    </p>
+<p>然后再生成模块进行加载即可。</p>
+<p>  还可以根据safe3提供的模块进行安装：</p>
+<p>  <a href="https://github.com/Safe3/clean-cow" target="_blank" rel="noopener">https://github.com/Safe3/clean-cow</a></p>
+<p>  PS：再次提醒，这个方法只能临时生效，重启之后需要重新加载，所以还是建议使用update进行修复。</p>
+</div><div class="post-copyright"><div class="post-copyright__author"><span class="post-copyright-meta">文章作者: </span><span class="post-copyright-info"><a href="mailto:undefined">Mr. Qian</a></span></div><div class="post-copyright__type"><span class="post-copyright-meta">文章链接: </span><span class="post-copyright-info"><a href="http://qbx12138.xyz/2020/06/20/Linux%E5%85%A8%E7%89%88%E6%9C%AC%E9%80%9A%E6%9D%80%E6%8F%90%E6%9D%83%E6%BC%8F%E6%B4%9E%E7%9A%84%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%86%E6%9E%90/">http://qbx12138.xyz/2020/06/20/Linux%E5%85%A8%E7%89%88%E6%9C%AC%E9%80%9A%E6%9D%80%E6%8F%90%E6%9D%83%E6%BC%8F%E6%B4%9E%E7%9A%84%E5%A4%8D%E7%8E%B0%E4%B8%8E%E5%88%86%E6%9E%90/</a></span></div><div class="post-copyright__notice"><span class="post-copyright-meta">版权声明: </span><span class="post-copyright-info">本博客所有文章除特别声明外，均采用 <a href="https://creativecommons.org/licenses/by-nc-sa/4.0/" target="_blank">CC BY-NC-SA 4.0</a> 许可协议。转载请注明来自 <a href="http://qbx12138.xyz" target="_blank">贤</a>！</span></div></div><div class="tag_share"><div class="post-meta__tag-list"><a class="post-meta__tags" href="/tags/%E5%AE%9E%E9%AA%8C/">实验</a></div><div class="post_share"><div class="social-share" data-image="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/193708-15779650287a6a.jpg" data-sites="facebook,twitter,wechat,weibo,qq"></div><link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/social-share.js/dist/css/share.min.css"/><script src="https://cdn.jsdelivr.net/npm/social-share.js/dist/js/social-share.min.js"></script></div></div><nav class="pagination-post" id="pagination"><div class="prev-post pull-left"><a href="/2020/06/25/IIS6.0%E8%BF%9C%E7%A8%8B%E4%BB%A3%E7%A0%81%E6%89%A7%E8%A1%8C0day%E6%BC%8F%E6%B4%9E%E5%88%86%E6%9E%90%E5%92%8C%E5%88%A9%E7%94%A8/"><img class="prev-cover" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/AA6.jpg" onerror="onerror=null;src='/img/404.jpg'"><div class="pagination-info"><div class="label">上一篇</div><div class="prev_info">IIS6.0远程代码执行0day漏洞分析和利用</div></div></a></div><div class="next-post pull-right"><a href="/2020/06/15/%E7%94%B112306%E6%92%9E%E5%BA%93%E4%BA%8B%E4%BB%B6%E5%BC%95%E5%8F%91%E7%9A%84%E6%80%9D%E8%80%83/"><img class="next-cover" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/231102-151931226201f1.jpg" onerror="onerror=null;src='/img/404.jpg'"><div class="pagination-info"><div class="label">下一篇</div><div class="next_info">由12306撞库事件引发的思考</div></div></a></div></nav><div class="relatedPosts"><div class="relatedPosts_headline"><i class="fas fa-thumbs-up fa-fw"></i><span> 相关推荐</span></div><div class="relatedPosts_list"><div class="relatedPosts_item"><a href="/2020/06/25/IIS6.0远程代码执行0day漏洞分析和利用/" title="IIS6.0远程代码执行0day漏洞分析和利用"><img class="relatedPosts_cover" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/AA6.jpg"><div class="relatedPosts_main is-center"><div class="relatedPosts_date"><i class="far fa-calendar-alt fa-fw"></i> 2020-06-25</div><div class="relatedPosts_title">IIS6.0远程代码执行0day漏洞分析和利用</div></div></a></div><div class="relatedPosts_item"><a href="/2020/07/02/POST注入-盲注/" title="POST注入-盲注"><img class="relatedPosts_cover" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/AA2.jpg"><div class="relatedPosts_main is-center"><div class="relatedPosts_date"><i class="far fa-calendar-alt fa-fw"></i> 2020-07-02</div><div class="relatedPosts_title">POST注入-盲注</div></div></a></div><div class="relatedPosts_item"><a href="/2020/06/15/由12306撞库事件引发的思考/" title="由12306撞库事件引发的思考"><img class="relatedPosts_cover" data-src="https://qbx-image.oss-cn-hangzhou.aliyuncs.com/231102-151931226201f1.jpg"><div class="relatedPosts_main is-center"><div class="relatedPosts_date"><i class="far fa-calendar-alt fa-fw"></i> 2020-06-15</div><div class="relatedPosts_title">由12306撞库事件引发的思考</div></div></a></div></div></div></article></main><footer id="footer" data-type="color"><div id="footer-wrap"><div class="copyright">&copy;2020 By Mr. Qian</div><div class="framework-info"><span>驱动 </span><a href="https://hexo.io" target="_blank" rel="noopener"><span>Hexo</span></a><span class="footer-separator">|</span><span>主题 </span><a href="https://github.com/jerryc127/hexo-theme-butterfly" target="_blank" rel="noopener"><span>Butterfly</span></a></div></div></footer></div><section class="rightside" id="rightside"><div id="rightside-config-hide"><button id="readmode" title="阅读模式"><i class="fas fa-book-open"></i></button><button id="font_plus" title="放大字体"><i class="fas fa-plus"></i></button><button id="font_minus" title="缩小字体"><i class="fas fa-minus"></i></button><button class="translate_chn_to_cht" id="translateLink" title="简繁转换">繁</button><button id="darkmode" title="浅色和深色模式转换"><i class="fas fa-adjust"></i></button></div><div id="rightside-config-show"><button id="rightside_config" title="设置"><i class="fas fa-cog"></i></button><button class="close" id="mobile-toc-button" title="目录"><i class="fas fa-list-ul"></i></button><button id="go-up" title="回到顶部"><i class="fas fa-arrow-up"></i></button></div></section><script src="https://cdn.jsdelivr.net/npm/jquery@latest/dist/jquery.min.js"></script><script src="/js/utils.js"></script><script src="/js/main.js"></script><script src="/js/tw_cn.js"></script><script src="https://cdn.jsdelivr.net/npm/@fancyapps/fancybox@latest/dist/jquery.fancybox.min.js"></script><script async src="//busuanzi.ibruce.info/busuanzi/2.3/busuanzi.pure.mini.js"></script><script src="https://cdn.jsdelivr.net/npm/instant.page/instantpage.min.js" type="module" defer></script><script src="https://cdn.jsdelivr.net/npm/vanilla-lazyload/dist/lazyload.iife.min.js" async></script></body></html>
